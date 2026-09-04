@@ -140,13 +140,22 @@ ensure_directory() {
 
 detect_usb() {
     local devices=()
+    local -A seen_dev=()   # 已收录的物理设备(去重 bind/重复挂载)
     while read -r dev mp _; do
-        [[ "$dev" =~ ^/dev/sd ]] || continue
-        [[ "$mp" == /boot* || "$mp" == / || "$mp" == /home ]] && continue
+        # 只认数据盘: sd* (USB/SATA) 或 nvme*n* (NVMe), 排除 swap 镜像等杂项
+        [[ "$dev" =~ ^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+)(p[0-9]+)?$ ]] || continue
+        [[ "$mp" == /boot* || "$mp" == / || "$mp" == /home \
+          || "$mp" == /home/Downloads || "$mp" == /home/Downloads/* ]] && continue
+        # 去重: 同一物理设备(如 /dev/sda)只取第一个挂载点(首个即主挂载)
+        if [[ -n "${seen_dev[$dev]:-}" ]]; then
+            continue
+        fi
+        seen_dev[$dev]=1
         local label="" size=""
-        label=$(lsblk -no LABEL "$dev" 2>/dev/null | head -1) || true
-        size=$(lsblk -no SIZE "$dev" 2>/dev/null | head -1) || true
-        [[ -z "$label" ]] && label="$(basename "$dev")"
+        label=$(lsblk -no LABEL "$dev" 2>/dev/null | xargs) || true
+        size=$(lsblk -no SIZE "$dev" 2>/dev/null | xargs) || true
+        # 无 LABEL 时用挂载点目录名(如 ssd0)而非设备名, 更友好
+        [[ -z "$label" ]] && label="$(basename "$mp")"
         devices+=("$mp|$label|$size")
     done < /proc/mounts
 
